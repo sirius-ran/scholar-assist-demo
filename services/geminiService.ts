@@ -74,10 +74,23 @@ function cleanJson(text: string): string {
 /**
  * 1. 生成论文摘要
  */
-export const generatePaperSummary = async (base64Data: string, mimeType: string): Promise<PaperSummary> => {
+// ... (之前的 import 和 callProxyApi 保持不变)
+
+/**
+ * 1. 生成论文摘要 (基于全文文本)
+ */
+export const generatePaperSummary = async (fullPaperText: string): Promise<PaperSummary> => {
+  
+  // 1. 检查文本长度，如果完全没提取到，直接报错
+  if (!fullPaperText || fullPaperText.length < 100) {
+      throw new Error("PDF 内容提取为空，可能文件是纯图片扫描版？");
+  }
+
   const prompt = `
     Role: You are the pixel library guardian "Scholar Cat" (学术猫).
-    Task: Analyze this academic paper and generate a "Magic Item Appraisal Report".
+    Task: Analyze the full content of this academic paper and generate a "Magic Item Appraisal Report".
+    
+    Input: The user has provided the parsed text of the PDF below.
     
     Output JSON ONLY with this structure:
     {
@@ -93,35 +106,33 @@ export const generatePaperSummary = async (base64Data: string, mimeType: string)
       ],
       "takeaways": ["Point 1", "Point 2", "Point 3"]
     }
+
+    --- BEGIN PAPER CONTENT ---
+    ${fullPaperText}
+    --- END PAPER CONTENT ---
   `;
 
+  // 构造纯文本消息 (不再用 image_url)
   const messages = [
     {
       role: "user",
-      content: [
-        { type: "text", text: prompt },
-        {
-          type: "image_url",
-          image_url: {
-            url: `data:${mimeType};base64,${base64Data}`
-          }
-        }
-      ]
+      content: prompt 
     }
   ];
 
   try {
+    // 复用之前的反代调用函数
     const text = await callProxyApi(messages, true);
     return JSON.parse(cleanJson(text)) as PaperSummary;
   } catch (error) {
     console.error("Summary generation failed:", error);
-    // ✅ 修改：返回友好的错误提示
+    // 返回兜底数据
     return {
       title: "解读中断",
       tags: ["系统维护中"],
       tldr: { 
-        painPoint: "与魔法图书馆的连接不稳定", 
-        solution: "请检查网络或稍后重试", 
+        painPoint: "文本量太大或提取失败", 
+        solution: "请尝试刷新重试", 
         effect: "暂无数据" 
       },
       methodology: [],
@@ -129,6 +140,7 @@ export const generatePaperSummary = async (base64Data: string, mimeType: string)
     };
   }
 };
+
 
 /**
  * 2. 翻译页面
