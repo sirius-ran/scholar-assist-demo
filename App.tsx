@@ -11,8 +11,9 @@ import PDFViewer from './components/PDFViewer';
 import TranslationViewer from './components/TranslationViewer';
 import { UploadIcon, BookOpenIcon, XIcon, SettingsIcon, GripVerticalIcon, StarIcon } from './components/IconComponents';
 
-// 引入新创建的 UI 组件
-import { MagicCard, ScholarCatMascot, RpgButton } from './components/UI';
+// 引入新组件
+import { MagicCard, RpgButton } from './components/UI';
+import { ScholarCatMascot } from './components/ScholarCatMascot'; // 确保路径正确
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.UPLOAD);
@@ -20,11 +21,11 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SidebarTab | 'DUAL'>('DUAL');
   const [aiModel, setAiModel] = useState<'gemini' | 'deepseek'>('gemini');
   
-  // PDF State
+  // PDF State (高亮逻辑的核心 State)
   const [currentPage, setCurrentPage] = useState(1);
   const [debouncedPage, setDebouncedPage] = useState(1);
-  const [highlightText, setHighlightText] = useState<string | null>(null);
-  const [triggerCapture, setTriggerCapture] = useState(0);
+  const [highlightText, setHighlightText] = useState<string | null>(null); // ✅ 保留：用于高亮
+  const [triggerCapture, setTriggerCapture] = useState(0); // ✅ 保留：用于截图触发
 
   // Layout State (Resizable)
   const [leftWidth, setLeftWidth] = useState(50);
@@ -54,18 +55,25 @@ const App: React.FC = () => {
   const [equationExplanation, setEquationExplanation] = useState<string | null>(null);
   const [isAnalyzingCitation, setIsAnalyzingCitation] = useState(false);
   const [isAnalyzingEquation, setIsAnalyzingEquation] = useState(false);
+  const [isError, setIsError] = useState(false); // 新增错误状态用于猫咪
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatting, setIsChatting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // --- 😺 计算猫咪状态逻辑 ---
+  // --- 😺 计算猫咪状态逻辑 (升级版) ---
   const getCatState = () => {
-    if (isSummarizing) return { mood: 'THINKING', msg: '正在啃读全文...' };
+    // 错误状态
+    if (isError) return { mood: 'ERROR', msg: '喵呜！系统出错了！' };
+    
+    // 思考/加载状态
+    if (isSummarizing) return { mood: 'THINKING', msg: '正在啃读全文 (疯狂翻书中)...' };
     if (isTranslatingPage) return { mood: 'THINKING', msg: '正在破译本页符文...' };
-    if (isChatting) return { mood: 'READING', msg: '让本喵翻翻书...' };
     if (isAnalyzingCitation || isAnalyzingEquation) return { mood: 'THINKING', msg: '正在检索上古卷轴...' };
-    if (notes.length > 0 && Math.random() > 0.9) return { mood: 'IDLE', msg: '你记的笔记很有深度喵！' };
+    if (isChatting) return { mood: 'THINKING', msg: '让本喵组织一下语言...' };
+    
+    // 成功/闲置状态
+    if (notes.length > 0 && Math.random() > 0.95) return { mood: 'SUCCESS', msg: '这笔记记得真棒！' };
     return { mood: 'IDLE', msg: toastMessage }; // 优先显示 Toast
   };
   const catState = getCatState();
@@ -159,10 +167,17 @@ const App: React.FC = () => {
 
   const fetchSummary = async (currentFile: PaperFile) => {
     setIsSummarizing(true);
+    setIsError(false);
     try {
       const result = await generatePaperSummary(currentFile.base64, currentFile.mimeType);
       setSummary(result);
-    } catch (err) { console.error(err); } finally { setIsSummarizing(false); }
+    } catch (err) { 
+        console.error(err); 
+        setIsError(true);
+        setTimeout(() => setIsError(false), 5000);
+    } finally { 
+        setIsSummarizing(false); 
+    }
   };
 
   // --- Page & Prefetch Logic ---
@@ -188,15 +203,28 @@ const App: React.FC = () => {
     try {
       const MAX_DIMENSION = 1000;
       let width = canvas.width, height = canvas.height, imageBase64 = '';
-      // ... (Image Scaling logic remains same) ...
-      // Assuming simple scaling for brevity in this display
-       imageBase64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+          const scale = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = width * scale;
+          tempCanvas.height = height * scale;
+          const ctx = tempCanvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+            imageBase64 = tempCanvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+          } else {
+            imageBase64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+          }
+      } else {
+          imageBase64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+      }
 
       const translation = await translatePageContent(imageBase64);
       translation.pageNumber = pageNum;
       setPageTranslations(prev => new Map(prev).set(pageNum, translation));
       if (pageNum === prefetchPage) setPrefetchPage(null);
     } catch(e) {
+      setIsError(true);
       if (pageNum === debouncedPage) {
          setPageTranslations(prev => new Map(prev).set(pageNum, { 
            pageNumber: pageNum, 
@@ -204,6 +232,7 @@ const App: React.FC = () => {
            glossary: [] 
          }));
       }
+      setTimeout(() => setIsError(false), 5000);
     } finally { if (pageNum === debouncedPage) setIsTranslatingPage(false); }
   };
 
@@ -227,7 +256,7 @@ const App: React.FC = () => {
     try {
       const info = await analyzeCitation(id, file.base64, file.mimeType);
       setCitationInfo(info);
-    } catch (e) { console.error(e); } finally { setIsAnalyzingCitation(false); }
+    } catch (e) { console.error(e); setIsError(true); } finally { setIsAnalyzingCitation(false); }
   };
 
   const handleEquationClick = async (eq: string) => {
@@ -236,7 +265,7 @@ const App: React.FC = () => {
     try {
       const expl = await explainEquation(eq);
       setEquationExplanation(expl);
-    } catch(e) { console.error(e); } finally { setIsAnalyzingEquation(false); }
+    } catch(e) { console.error(e); setIsError(true); } finally { setIsAnalyzingEquation(false); }
   };
 
   const handleContextSelection = (text: string, action: 'explain' | 'save') => {
@@ -265,6 +294,7 @@ const App: React.FC = () => {
       }
       setChatMessages(prev => [...prev, { role: 'model', text: answer }]);
     } catch (err) {
+      setIsError(true);
       setChatMessages(prev => [...prev, { role: 'model', text: "喵？网络似乎不通畅... 请重试", isError: true }]);
     } finally { setIsChatting(false); }
   };
@@ -276,7 +306,6 @@ const App: React.FC = () => {
 
   // ================= RENDER =================
 
-  // 1. UPLOAD MODE
   if (mode === AppMode.UPLOAD) {
     return (
       <div className="min-h-screen bg-rpg-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -397,7 +426,7 @@ const App: React.FC = () => {
       {/* --- Main Content --- */}
       <div className="flex-1 flex overflow-hidden relative">
         
-        {/* LEFT: PDF */}
+        {/* LEFT: PDF (重要：保留了 highlightText 和 triggerCapture) */}
         <div className="h-full relative bg-rpg-faded" style={{ width: `${leftWidth}%` }}>
           {file && (
              <PDFViewer 
@@ -406,8 +435,8 @@ const App: React.FC = () => {
                pageNumber={currentPage}
                onPageChange={setCurrentPage}
                onPageRendered={handleMainPageRendered}
-               highlightText={highlightText}
-               triggerCapture={triggerCapture}
+               highlightText={highlightText} // ✅ 核心逻辑保留
+               triggerCapture={triggerCapture} // ✅ 核心逻辑保留
                onTextSelected={handleContextSelection}
              />
           )}
@@ -430,7 +459,7 @@ const App: React.FC = () => {
              <TranslationViewer 
                translation={pageTranslations.get(debouncedPage)}
                isLoading={isTranslatingPage}
-               onHoverBlock={setHighlightText}
+               onHoverBlock={setHighlightText} // ✅ 核心交互保留：鼠标悬停触发左侧高亮
                onRetry={() => setTriggerCapture(prev => prev + 1)}
                onCitationClick={handleCitationClick}
                onEquationClick={handleEquationClick}
@@ -466,8 +495,6 @@ const App: React.FC = () => {
         </div>
 
         {/* --- Modals --- */}
-        
-        {/* Citation Oracle */}
         {(isAnalyzingCitation || citationInfo) && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in backdrop-blur-sm">
             <MagicCard title="真视之眼 (THE ORACLE)" className="w-full max-w-lg" onClose={() => { setCitationInfo(null); setIsAnalyzingCitation(false); }}>
@@ -494,7 +521,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Equation Lens */}
         {(isAnalyzingEquation || equationExplanation) && (
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-2xl z-50 p-4">
             <MagicCard title="魔镜解析 (MAGIC LENS)" onClose={() => { setEquationExplanation(null); setIsAnalyzingEquation(false); }}>
@@ -512,9 +538,9 @@ const App: React.FC = () => {
         )}
       </div>
       
-      {/* 😺 全局伴读猫咪 (Floating UI) */}
+      {/* 😺 全局动态伴读猫咪 (Floating UI) */}
       <ScholarCatMascot 
-        mood={catState.mood} 
+        mood={catState.mood as any} 
         message={catState.msg} 
         onClick={() => setActiveTab(SidebarTab.CHAT)}
       />
