@@ -3,6 +3,7 @@ import { Page } from 'react-pdf';
 import ReactMarkdown from 'react-markdown';
 import { PaperFile, PaperSummary, SidebarTab, ChatMessage, AppMode, PageTranslation, ContentBlock, CitationInfo, AppearanceSettings, Note } from './types';
 import { generatePaperSummary, chatWithPaper, translatePageContent, analyzeCitation, explainEquation } from './services/geminiService';
+import { chatWithDeepSeek } from './services/deepseekService';
 import SummaryView from './components/SummaryView';
 import ChatInterface from './components/ChatInterface';
 import Translator from './components/Translator';
@@ -14,6 +15,7 @@ const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.UPLOAD);
   const [file, setFile] = useState<PaperFile | null>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab | 'DUAL'>('DUAL');
+  const [aiModel, setAiModel] = useState<'gemini' | 'deepseek'>('gemini');
   
   // PDF State
   const [currentPage, setCurrentPage] = useState(1);
@@ -339,9 +341,22 @@ const App: React.FC = () => {
     const newUserMsg: ChatMessage = { role: 'user', text };
     setChatMessages(prev => [...prev, newUserMsg]);
     setIsChatting(true);
+    
     try {
-      const historyForApi = chatMessages.map(m => ({ role: m.role, text: m.text }));
-      const answer = await chatWithPaper(historyForApi, text, file.base64, file.mimeType);
+      let answer = '';
+
+      // 👇 修改核心逻辑：根据 aiModel 状态选择服务
+      if (aiModel === 'deepseek') {
+        // 调用 DeepSeek (注意：DeepSeek 标准接口不直接传 PDF 文件，这里仅传文本)
+        // 如果你想让 DeepSeek 也能读论文，需要先提取 PDF 文本传进去，这里暂时演示纯对话
+        const response = await chatWithDeepSeek(text);
+        answer = response || "DeepSeek 没有返回内容";
+      } else {
+        // 调用 Gemini (支持多模态，传 PDF Base64)
+        const historyForApi = chatMessages.map(m => ({ role: m.role, text: m.text }));
+        answer = await chatWithPaper(historyForApi, text, file.base64, file.mimeType);
+      }
+      
       setChatMessages(prev => [...prev, { role: 'model', text: answer }]);
     } catch (err) {
       setChatMessages(prev => [...prev, { role: 'model', text: "喵？网络似乎不通畅... 请重试", isError: true }]);
@@ -430,8 +445,30 @@ const App: React.FC = () => {
              </button>
              
              {showSettings && (
-               <div className="absolute top-full right-0 mt-2 w-64 bg-[#e8e4d9] border-4 border-[#2c1810] shadow-xl p-4 z-50 rounded animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute top-full right-0 mt-2 w-64 bg-[#e8e4d9] border-4 border-[#2c1810] shadow-xl p-4 z-50 rounded animate-in fade-in zoom-in-95 duration-100">
+                  
+                  {/* 👇 新增：模型切换区域 */}
+                  <div className="mb-4 border-b-2 border-[#8B4513]/20 pb-4">
+                    <h4 className="pixel-font text-xs font-bold mb-2 text-[#2c1810]">AI 模型 (MODEL)</h4>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setAiModel('gemini')}
+                        className={`flex-1 py-1 text-xs border-2 font-bold transition-all ${aiModel === 'gemini' ? 'bg-[#2c1810] text-[#DAA520] border-[#DAA520]' : 'border-[#8B4513] text-[#8B4513] opacity-50'}`}
+                      >
+                        Gemini
+                      </button>
+                      <button 
+                        onClick={() => setAiModel('deepseek')}
+                        className={`flex-1 py-1 text-xs border-2 font-bold transition-all ${aiModel === 'deepseek' ? 'bg-[#000080] text-[#fff] border-[#0000ff]' : 'border-[#8B4513] text-[#8B4513] opacity-50'}`}
+                      >
+                        DeepSeek
+                      </button>
+                    </div>
+                  </div>
+                  {/* 👆 新增结束 */}
+              
                  <h4 className="pixel-font text-xs font-bold mb-4 text-[#2c1810]">外观 (APPEARANCE)</h4>
+                 
                  
                  {/* Theme Toggle */}
                  <div className="mb-4">
