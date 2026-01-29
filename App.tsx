@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Page } from 'react-pdf'; 
 import ReactMarkdown from 'react-markdown';
 import { PaperFile, PaperSummary, SidebarTab, ChatMessage, AppMode, PageTranslation, ContentBlock, CitationInfo, AppearanceSettings, Note } from './types';
-import { extractTextFromPdf } from './utils/pdfUtils';
+import { extractTextFromPdf, fileToBase64 } from './utils/pdfUtils';
+import { generateFingerprint, getSummary, saveSummary, getPageTranslation, savePageTranslation } from './utils/storage';
 import { generatePaperSummary, chatWithPaper, translatePageContent, analyzeCitation, explainEquation } from './services/geminiService';
 import { chatWithDeepSeek } from './services/deepseekService';
 import SummaryView from './components/SummaryView';
@@ -15,6 +15,7 @@ import { UploadIcon, BookOpenIcon, XIcon, SettingsIcon, GripVerticalIcon, StarIc
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(AppMode.UPLOAD);
   const [file, setFile] = useState<PaperFile | null>(null);
+  const [fileFingerprint, setFileFingerprint] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab | 'DUAL'>('DUAL');
   const [aiModel, setAiModel] = useState<'gemini' | 'deepseek'>('gemini');
   
@@ -47,9 +48,10 @@ const App: React.FC = () => {
 
   // Data States
   const [summary, setSummary] = useState<PaperSummary | null>(null);
+  const [fullText, setFullText] = useState<string>("");
   const [isSummarizing, setIsSummarizing] = useState(false);
   
-  // Page Translation Cache
+  // Page Translation Cache (In-Memory + DB)
   const [pageTranslations, setPageTranslations] = useState<Map<number, PageTranslation>>(new Map());
   const [isTranslatingPage, setIsTranslatingPage] = useState(false);
 
@@ -148,93 +150,64 @@ const App: React.FC = () => {
   }, [resize, stopResizing]);
 
 
-  const handleFileUpload = async (file: File) => {
-  // A. 界面初始化：先让 PDF 显示出来，不用等 AI
-  const base64 = await fileToBase64(file);
-  setPdfData(base64);
-  
-  // 生成文件指纹 (ID)
-  const fingerprint = getFileFingerprint(file);
-
-  try {
-    setIsLoading(true);
-
-    // B. 本地解析 (CPU 运算，免费)
-    // ⚠️ 必须做：无论是否命中缓存，我们都需要这份文本给“聊天模式”当上下文
-    console.log("正在提取 PDF 全文文本...");
-    const textContent = await extractTextFromPdf(base64);
-    
-    // 把全文存入状态，给 Chat 功能用 (这一步很重要！)
-    // 假设你有一个 setFullText 的 state，如果没有，请创建一个
-    setFullText(textContent); 
-
-    // C. 💰 省钱时刻：检查缓存
-    const cachedSummary = getCachedSummary(fingerprint);
-
-    if (cachedSummary) {
-      console.log(`[Cache] 🎯 命中缓存！指纹: ${fingerprint}`);
-      console.log("💰 这是一个回头客，直接加载旧记忆，省了一笔 API 费！");
-      
-      setSummary(cachedSummary);
-      // 任务结束，Loading 消失，无需联网
-    } else {
-      // D. 缓存未命中：只能花钱了
-      console.log("[Cache] 💨 是新论文，准备召唤学术猫 (API)...");
-      
-      // 调用 Gemini (这是唯一花 API 额度的地方)
-      const newSummary = await generatePaperSummary(textContent);
-      
-      // 存入缓存，造福下一次
-      saveSummaryToCache(fingerprint, newSummary);
-      
-      setSummary(newSummary);
-    }
-
-  } catch (error) {
-    console.error("处理失败:", error);
-    // 错误处理：如果是解析失败，可能是扫描版
-    // 如果是 API 失败，已经在 Service 层拦截过了，这里只做兜底
-    alert("喵呜！读取论文失败了，请检查网络或文件格式。");
-  } finally {
-    setIsLoading(false);
-  }
-};
-  // File Handler
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // --- File Upload & Processing Logic (Improved) ---
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
       const selectedFile = event.target.files[0];
-      const reader = new FileReader();
+      
+      // 1. Basic Setup
+      const base64Data = await fileToBase64(selectedFile);
+      const fingerprint = await generateFingerprint(selectedFile);
+      setFileFingerprint(fingerprint);
 
-      reader.onload = async (e) => {
-        const base64Raw = e.target?.result as string;
-        const base64Data = base64Raw.split(',')[1];
-        
-        const newFile: PaperFile = {
-          name: selectedFile.name,
-          url: URL.createObjectURL(selectedFile),
-          base64: base64Data,
-          mimeType: selectedFile.type
-        };
-
-        setFile(newFile);
-        setMode(AppMode.READING);
-        setCurrentPage(1);
-        setDebouncedPage(1);
-        fetchSummary(newFile);
+      const newFile: PaperFile = {
+        name: selectedFile.name,
+        url: URL.createObjectURL(selectedFile),
+        base64: base64Data,
+        mimeType: selectedFile.type
       };
-      reader.readAsDataURL(selectedFile);
-    }
-  };
 
-  const fetchSummary = async (currentFile: PaperFile) => {
-    setIsSummarizing(true);
-    try {
-      const result = await generatePaperSummary(currentFile.base64, currentFile.mimeType);
-      setSummary(result);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSummarizing(false);
+      setFile(newFile);
+      setMode(AppMode.READING);
+      setCurrentPage(1);
+      setDebouncedPage(1);
+      
+      // 2. Check Cache for Summary
+      try {
+        setIsSummarizing(true);
+        const cachedData = await getSummary(fingerprint);
+        
+        if (cachedData) {
+          console.log(`[Cache] 🎯 Summary hit for ${fingerprint}`);
+          setSummary(cachedData.summary);
+          setFullText(cachedData.fullText || "");
+          setIsSummarizing(false);
+        } else {
+          console.log("[Cache] 💨 Miss. Generating summary...");
+          // A. Extract Text (Local CPU)
+          const textContent = await extractTextFromPdf(base64Data);
+          setFullText(textContent);
+          
+          // B. Generate Summary (API)
+          const newSummary = await generatePaperSummary(textContent);
+          
+          // C. Save to Cache
+          await saveSummary(fingerprint, selectedFile.name, newSummary, textContent);
+          
+          setSummary(newSummary);
+          setIsSummarizing(false);
+        }
+      } catch (error) {
+        console.error("Processing failed:", error);
+        setSummary({
+          title: "解析失败",
+          tags: ["ERROR"],
+          tldr: { painPoint: "无法读取文件", solution: "请重试或检查文件", effect: "无" },
+          methodology: [],
+          takeaways: []
+        });
+        setIsSummarizing(false);
+      }
     }
   };
 
@@ -246,31 +219,55 @@ const App: React.FC = () => {
     return () => clearTimeout(handler);
   }, [currentPage]);
 
-  // Trigger Capture & Pre-fetch Logic
+
+  // --- Auto-Translate & Pre-fetch Logic ---
   useEffect(() => {
-    if (mode === AppMode.READING) {
-      // 1. If current page not translated, trigger capture
-      if (!pageTranslations.has(debouncedPage) && !isTranslatingPage) {
-        setTriggerCapture(prev => prev + 1);
-      } 
-      // 2. Background Auto-Scribe: If current page IS done, try to pre-fetch next page
-      else if (pageTranslations.has(debouncedPage) && !isTranslatingPage) {
-        const nextPage = debouncedPage + 1;
-        // Check if next page is already cached, if not, prefetch it
-        if (!pageTranslations.has(nextPage)) {
-           setPrefetchPage(nextPage);
+    const checkAndTrigger = async () => {
+      if (mode !== AppMode.READING || !fileFingerprint) return;
+
+      // 1. Current Page Translation
+      if (!pageTranslations.has(debouncedPage)) {
+        // Check DB first
+        const cachedTrans = await getPageTranslation(fileFingerprint, debouncedPage);
+        if (cachedTrans) {
+           console.log(`[Cache] 📖 Page ${debouncedPage} hit.`);
+           setPageTranslations(prev => new Map(prev).set(debouncedPage, cachedTrans));
+        } else if (!isTranslatingPage) {
+           // Not in DB, trigger capture to call API
+           console.log(`[Trans] ⚡ Requesting capture for Page ${debouncedPage}`);
+           setTriggerCapture(prev => prev + 1);
         }
       }
-    }
-  }, [debouncedPage, mode, pageTranslations, isTranslatingPage]);
+
+      // 2. Next Page Pre-fetch (Only if current is done)
+      if (pageTranslations.has(debouncedPage) && !isTranslatingPage) {
+        const nextPage = debouncedPage + 1;
+        // Check local state
+        if (!pageTranslations.has(nextPage)) {
+           // Check DB
+           const cachedNext = await getPageTranslation(fileFingerprint, nextPage);
+           if (cachedNext) {
+              setPageTranslations(prev => new Map(prev).set(nextPage, cachedNext));
+           } else {
+              // Not in DB, set as prefetch target
+              setPrefetchPage(nextPage);
+           }
+        }
+      }
+    };
+    
+    checkAndTrigger();
+  }, [debouncedPage, mode, pageTranslations, isTranslatingPage, fileFingerprint]);
+
 
   const processCanvas = async (canvas: HTMLCanvasElement, pageNum: number) => {
+    // Double check if we already have it to avoid race conditions
     if (pageTranslations.has(pageNum)) return;
 
     if (pageNum === debouncedPage) setIsTranslatingPage(true);
 
     try {
-      // Downscale
+      // 1. Downscale for API efficiency
       const MAX_DIMENSION = 1000;
       let width = canvas.width;
       let height = canvas.height;
@@ -291,10 +288,16 @@ const App: React.FC = () => {
           imageBase64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
       }
 
+      // 2. API Call
       const translation = await translatePageContent(imageBase64);
-      // Ensure pageNumber is set correctly
       translation.pageNumber = pageNum;
 
+      // 3. Save to DB
+      if (fileFingerprint) {
+        await savePageTranslation(fileFingerprint, pageNum, translation);
+      }
+
+      // 4. Update State
       setPageTranslations(prev => {
         const newMap = new Map(prev);
         newMap.set(pageNum, translation);
@@ -307,16 +310,17 @@ const App: React.FC = () => {
 
     } catch(e) {
       console.error(e);
-      // If main page fails, mark error. 
+      // If main page fails, mark error locally so we don't retry loop infinitely
       if (pageNum === debouncedPage) {
         const errorBlock: ContentBlock = {
             type: 'paragraph',
             en: '',
-            cn: '魔法能量紊乱，无法解析卷轴内容...'
+            cn: '魔法能量紊乱，无法解析卷轴内容...请稍后重试。'
         };
+        const errTrans = { pageNumber: pageNum, blocks: [errorBlock], glossary: [] };
         setPageTranslations(prev => {
             const newMap = new Map(prev);
-            newMap.set(pageNum, { pageNumber: pageNum, blocks: [errorBlock], glossary: [] });
+            newMap.set(pageNum, errTrans);
             return newMap;
         });
       }
@@ -326,22 +330,19 @@ const App: React.FC = () => {
   };
 
   const handleMainPageRendered = useCallback((canvas: HTMLCanvasElement, pageNum: number) => {
-     // Only process if it matches the current user intent to avoid stale renders
-     if (pageNum === debouncedPage) {
+     // Only process if it matches the current user intent and we don't have it yet
+     // The useEffect checks for DB cache first, so if we get here, it means we need to process or we are just rendering for display
+     if (pageNum === debouncedPage && !pageTranslations.has(pageNum)) {
        processCanvas(canvas, pageNum);
      }
-  }, [debouncedPage]);
+  }, [debouncedPage, pageTranslations]);
 
   // Callback for the hidden background reader
-  const handlePrefetchRendered = useCallback(() => {
-    const hiddenContainer = document.getElementById('hidden-prefetch-container');
-    if (hiddenContainer && prefetchPage) {
-      const canvas = hiddenContainer.querySelector('canvas');
-      if (canvas) {
-        processCanvas(canvas, prefetchPage);
-      }
+  const handlePrefetchRendered = useCallback((canvas: HTMLCanvasElement, pageNum: number) => {
+    if (pageNum === prefetchPage && !pageTranslations.has(pageNum)) {
+      processCanvas(canvas, pageNum);
     }
-  }, [prefetchPage]);
+  }, [prefetchPage, pageTranslations]);
 
   // --- Interaction Handlers ---
 
@@ -389,22 +390,17 @@ const App: React.FC = () => {
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!file) return;
     const newUserMsg: ChatMessage = { role: 'user', text };
     setChatMessages(prev => [...prev, newUserMsg]);
     setIsChatting(true);
     
     try {
       let answer = '';
-
-      // 👇 修改核心逻辑：根据 aiModel 状态选择服务
       if (aiModel === 'deepseek') {
-        // 调用 DeepSeek (注意：DeepSeek 标准接口不直接传 PDF 文件，这里仅传文本)
-        // 如果你想让 DeepSeek 也能读论文，需要先提取 PDF 文本传进去，这里暂时演示纯对话
         const response = await chatWithDeepSeek(text);
         answer = response || "DeepSeek 没有返回内容";
       } else {
-        // 调用 Gemini (支持多模态，传 PDF Base64)
+        if (!file) return;
         const historyForApi = chatMessages.map(m => ({ role: m.role, text: m.text }));
         answer = await chatWithPaper(historyForApi, text, file.base64, file.mimeType);
       }
@@ -419,6 +415,7 @@ const App: React.FC = () => {
 
   const resetApp = () => {
     setFile(null);
+    setFileFingerprint(null);
     setMode(AppMode.UPLOAD);
     setSummary(null);
     setChatMessages([]);
@@ -437,14 +434,14 @@ const App: React.FC = () => {
         
         <div className="max-w-xl w-full text-center space-y-8 animate-in fade-in duration-700 relative z-10">
           <div>
-             <div className="bg-[#8B4513] w-20 h-20 mx-auto flex items-center justify-center mb-6 rpg-border">
+             <div className="bg-[#8B4513] w-20 h-20 mx-auto flex items-center justify-center mb-6 rpg-border shadow-[4px_4px_0_0_#1a0f0a]">
               <BookOpenIcon className="text-[#DAA520] w-10 h-10" />
             </div>
-            <h1 className="text-4xl font-bold text-[#e8e4d9] mb-3 pixel-font leading-relaxed tracking-wider">Scholar Scroll</h1>
+            <h1 className="text-4xl font-bold text-[#e8e4d9] mb-3 pixel-font leading-relaxed tracking-wider drop-shadow-md">Scholar Scroll</h1>
             <p className="text-lg text-[#DAA520] serif italic">研读卷轴 · 解锁古老知识的秘密</p>
           </div>
 
-          <div className="bg-[#e8e4d9] p-10 rpg-border hover:brightness-110 transition-all cursor-pointer group relative">
+          <div className="bg-[#e8e4d9] p-10 rpg-border hover:brightness-110 transition-all cursor-pointer group relative shadow-[8px_8px_0_0_#1a0f0a] active:translate-y-1 active:shadow-[4px_4px_0_0_#1a0f0a]">
             <input type="file" accept=".pdf" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
             <div className="space-y-4">
               <div className="w-16 h-16 bg-[#2c1810] rounded-full flex items-center justify-center mx-auto group-hover:scale-110 transition-transform duration-300 border-2 border-[#DAA520]">
@@ -452,6 +449,10 @@ const App: React.FC = () => {
               </div>
               <p className="font-bold text-lg text-[#2c1810] pixel-font">召唤 PDF 卷轴 (SUMMON PDF)</p>
             </div>
+          </div>
+          
+          <div className="text-[#8B4513] text-xs serif italic">
+            * 您的卷轴将被自动封存至本地魔法书架 (IndexedDB)
           </div>
         </div>
       </div>
@@ -469,7 +470,7 @@ const App: React.FC = () => {
                fileUrl={file.url}
                pageNumber={prefetchPage}
                onPageChange={() => {}}
-               onPageRendered={() => handlePrefetchRendered()} 
+               onPageRendered={handlePrefetchRendered} 
                triggerCapture={1} // Force capture immediately
              />
         </div>
@@ -499,7 +500,7 @@ const App: React.FC = () => {
              {showSettings && (
                 <div className="absolute top-full right-0 mt-2 w-64 bg-[#e8e4d9] border-4 border-[#2c1810] shadow-xl p-4 z-50 rounded animate-in fade-in zoom-in-95 duration-100">
                   
-                  {/* 👇 新增：模型切换区域 */}
+                  {/* Model Switcher */}
                   <div className="mb-4 border-b-2 border-[#8B4513]/20 pb-4">
                     <h4 className="pixel-font text-xs font-bold mb-2 text-[#2c1810]">AI 模型 (MODEL)</h4>
                     <div className="flex gap-2">
@@ -517,10 +518,8 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  {/* 👆 新增结束 */}
               
                  <h4 className="pixel-font text-xs font-bold mb-4 text-[#2c1810]">外观 (APPEARANCE)</h4>
-                 
                  
                  {/* Theme Toggle */}
                  <div className="mb-4">
@@ -651,7 +650,7 @@ const App: React.FC = () => {
           )}
 
           {activeTab === SidebarTab.SUMMARY && (
-             <div className="p-6 h-full overflow-y-auto bg-[#e8e4d9]">
+             <div className="p-0 h-full overflow-y-auto bg-[#f4ecd8]">
                <SummaryView summary={summary} isLoading={isSummarizing} error={null} />
              </div>
           )}
