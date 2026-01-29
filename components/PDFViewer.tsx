@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, forwardRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, forwardRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ChevronLeftIcon, ChevronRightIcon, ZoomInIcon, ZoomOutIcon, LoaderIcon, InfoIcon, StarIcon } from './IconComponents';
 
-// Configure PDF.js worker
+// Configure PDF.js worker from CDN for stability
 pdfjs.GlobalWorkerOptions.workerSrc = `https://esm.sh/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
 interface PDFViewerProps {
@@ -60,11 +60,13 @@ const PDFViewer = forwardRef<HTMLDivElement, PDFViewerProps>(({
     }
   };
 
+  // Trigger capture via prop signal
   useEffect(() => {
     if ((triggerCapture || 0) > 0) {
+      // Small delay to ensure render is complete
       const timer = setTimeout(() => {
         captureCanvas();
-      }, 100);
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [triggerCapture, pageNumber]);
@@ -127,7 +129,6 @@ const PDFViewer = forwardRef<HTMLDivElement, PDFViewerProps>(({
          endIndex = startIndex + normalizedQuery.length - 1;
       } else {
          // Fallback: Anchor Matching (Head & Tail)
-         // Helpful when AI text varies slightly from PDF OCR (middle of paragraph errors)
          const ANCHOR_LEN = Math.min(30, Math.floor(normalizedQuery.length / 2));
          
          if (ANCHOR_LEN > 5) {
@@ -312,7 +313,10 @@ const PDFViewer = forwardRef<HTMLDivElement, PDFViewerProps>(({
                 renderTextLayer={true} 
                 renderAnnotationLayer={true} 
                 className="bg-white"
-                onRenderSuccess={() => setTimeout(captureCanvas, 200)}
+                onRenderSuccess={() => {
+                  // Wait a bit for canvas to be fully ready before signal
+                  setTimeout(captureCanvas, 300);
+                }}
                 onGetTextSuccess={() => setTextLayerReady(true)}
               />
               
