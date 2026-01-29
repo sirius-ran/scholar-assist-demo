@@ -4,160 +4,109 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ScholarAssist CN - 研读卷轴</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 1. 引入 Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;700&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+
+    <!-- 2. 引入 Tailwind 并立即配置 Theme -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              rpg: {
+                dark: '#2c1810',    // 深咖色（主视觉）
+                paper: '#e8e4d9',   // 羊皮纸浅色
+                paperDark: '#f5f2e9', // 羊皮纸深色（卡片背景）
+                gold: '#DAA520',    // 金色高亮
+                brown: '#8B4513',   // 棕色边框
+                faded: '#5c4033',   // 辅助文字
+              }
+            },
+            fontFamily: {
+              pixel: ['"Press Start 2P"', 'cursive'],
+              serif: ['"Noto Serif SC"', 'serif'],
+            },
+            animation: {
+              'bounce-slight': 'bounce-slight 2s infinite',
+            },
+            keyframes: {
+              'bounce-slight': {
+                '0%, 100%': { transform: 'translateY(-2px)' },
+                '50%': { transform: 'translateY(2px)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+
     <style>
       :root {
-        --bg-color: #1a100c; /* 更深的咖啡色 */
-        --accent-color: #e6c276; /* 羊皮纸金 */
-        --magic-glow: #ffd700;
+        --bg-color: #1a100c; 
+        --accent-color: #e6c276;
       }
 
+      /* 3. 全局样式 & 猫爪光标 */
       body {
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
         background-color: var(--bg-color);
         margin: 0;
         overflow: hidden;
-      }
-      .serif { font-family: 'Noto Serif SC', serif; }
-      .pixel-font { font-family: 'Press Start 2P', cursive; }
-      
-      /* --- 核心：RPG 加载页美化版 --- */
-      #app-loader {
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        /* 背景升级：径向渐变，制造“聚光灯”效果 */
-        background: radial-gradient(circle at center, #2c1810 0%, #0f0805 100%);
-        z-index: 9999;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        transition: opacity 0.6s ease-in-out;
+        /* 猫爪光标 (SVG Data URI) */
+        cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" style="fill:black;stroke:white;stroke-width:1px;"><text y="20" font-size="20">🐾</text></svg>'), auto;
       }
 
-      /* 学者猫容器 */
-      .scholar-cat-container {
-        width: 120px;
-        height: 120px;
-        margin-bottom: 20px;
-        position: relative;
-        animation: float-magical 3s ease-in-out infinite;
-      }
-
-      /* 悬浮动画 */
-      @keyframes float-magical {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-15px); }
-      }
-
-      /* 猫的 SVG 样式 */
-      .cat-svg {
-        width: 100%;
-        height: 100%;
-        drop-shadow: 0 10px 15px rgba(0,0,0,0.5);
-      }
-      .cat-eye {
-        animation: blink 4s infinite;
-        transform-origin: center;
-      }
-      @keyframes blink {
-        0%, 48%, 52%, 100% { transform: scaleY(1); }
-        50% { transform: scaleY(0.1); }
-      }
-
-      /* 书本发光 */
-      .magic-book-glow {
-        animation: glow-pulse 2s infinite alternate;
-      }
-      @keyframes glow-pulse {
-        from { opacity: 0.3; }
-        to { opacity: 0.8; }
-      }
-
-      /* 复古文字优化 */
-      .loading-text {
-        font-family: 'Press Start 2P', cursive;
-        color: var(--accent-color);
-        font-size: 12px; /* 稍微调小一点，更精致 */
-        margin-bottom: 20px;
-        text-shadow: 0 0 10px rgba(230, 194, 118, 0.3);
-        letter-spacing: 3px;
-        text-transform: uppercase;
-        opacity: 0.9;
-      }
-      
-      .loading-dots::after {
-        content: '.';
-        animation: dots 1.5s steps(5, end) infinite;
-      }
-      @keyframes dots {
-        0%, 20% { content: '.'; }
-        40% { content: '..'; }
-        60% { content: '...'; }
-        80%, 100% { content: ''; }
-      }
-
-      /* RPG 进度条容器美化 */
-      .rpg-progress-container {
-        width: 280px;
-        height: 16px; /* 更细一点，更优雅 */
-        background-color: #1a0f0a;
-        position: relative;
-        border: 2px solid #5d4037;
-        padding: 3px;
-        box-shadow: 0 0 15px rgba(0,0,0,0.5);
-        border-radius: 4px;
-      }
-
-      /* 进度条填充 - 魔法流动效果 */
-      .rpg-progress-bar {
-        height: 100%;
-        width: 0%;
-        background: linear-gradient(90deg, #b8860b, #ffd700, #b8860b);
-        background-size: 200% 100%;
-        border-radius: 2px;
-        position: relative;
-        box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
-        animation: 
-          fill-up 2s ease-out forwards,
-          shimmer 2s linear infinite;
-      }
-
-      @keyframes shimmer {
-        0% { background-position: 100% 0; }
-        100% { background-position: -100% 0; }
-      }
-
-      @keyframes fill-up {
-        0% { width: 0%; }
-        50% { width: 70%; }
-        100% { width: 90%; }
-      }
-
-      /* 底部状态文字 */
-      .status-text {
-        font-family: 'Inter', sans-serif;
-        font-size: 11px; 
-        margin-top: 12px; 
-        color: #8d7b68;
-        font-style: italic;
-      }
-
-      /* --- 原有滚动条等样式保持不变 --- */
+      /* 自定义滚动条 */
       ::-webkit-scrollbar { width: 12px; height: 12px; }
       ::-webkit-scrollbar-track { background: #e8e4d9; border-left: 2px solid #2c1810; }
       ::-webkit-scrollbar-thumb { background: #8B4513; border: 2px solid #e8e4d9; }
       ::-webkit-scrollbar-thumb:hover { background: #A0522D; }
-      
+
+      /* PDF 图层控制 */
       .react-pdf__Page__canvas { display: block; user-select: none; z-index: 1; }
       .react-pdf__Page__textContent { position: absolute; top: 0; left: 0; transform-origin: 0 0; color: transparent; line-height: 1; pointer-events: all; user-select: text; z-index: 20; }
-      .react-pdf__Page__textContent span { position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
-      .react-pdf__Page__annotations { position: absolute; top: 0; left: 0; transform-origin: 0 0; pointer-events: auto; z-index: 30; }
-      .react-pdf__Page__annotations .linkAnnotation > a { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent !important; cursor: pointer; pointer-events: auto; }
+      .react-pdf__Page__annotations { position: absolute; top: 0; left: 0; pointer-events: auto; z-index: 30; }
+      .react-pdf__Page__annotations .linkAnnotation > a { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; cursor: pointer; }
       
-      .rpg-border { box-shadow: -4px 0 0 0 #2c1810, 4px 0 0 0 #2c1810, 0 -4px 0 0 #2c1810, 0 4px 0 0 #2c1810; margin: 4px; background-color: #f5f2e9; }
+      /* --- Loader 样式 (保持你的原设计) --- */
+      #app-loader {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: radial-gradient(circle at center, #2c1810 0%, #0f0805 100%);
+        z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center;
+        transition: opacity 0.6s ease-in-out;
+      }
+      .scholar-cat-container { width: 120px; height: 120px; margin-bottom: 20px; animation: float-magical 3s ease-in-out infinite; }
+      @keyframes float-magical { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+      .cat-eye { animation: blink 4s infinite; transform-origin: center; }
+      @keyframes blink { 0%, 48%, 52%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.1); } }
+      .magic-book-glow { animation: glow-pulse 2s infinite alternate; }
+      @keyframes glow-pulse { from { opacity: 0.3; } to { opacity: 0.8; } }
+      
+      .loading-text {
+        font-family: 'Press Start 2P', cursive; color: var(--accent-color);
+        font-size: 12px; margin-bottom: 20px; text-shadow: 0 0 10px rgba(230, 194, 118, 0.3);
+        letter-spacing: 3px; text-transform: uppercase;
+      }
+      .loading-dots::after { content: '.'; animation: dots 1.5s steps(5, end) infinite; }
+      @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 80%, 100% { content: ''; } }
+      
+      .rpg-progress-container {
+        width: 280px; height: 16px; background-color: #1a0f0a;
+        border: 2px solid #5d4037; padding: 3px; border-radius: 4px; box-shadow: 0 0 15px rgba(0,0,0,0.5);
+      }
+      .rpg-progress-bar {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, #b8860b, #ffd700, #b8860b);
+        background-size: 200% 100%;
+        border-radius: 2px;
+        animation: fill-up 2s ease-out forwards, shimmer 2s linear infinite;
+      }
+      @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+      @keyframes fill-up { 0% { width: 0%; } 50% { width: 70%; } 100% { width: 90%; } }
+      .status-text { font-family: 'Inter', sans-serif; font-size: 11px; margin-top: 12px; color: #8d7b68; font-style: italic; }
     </style>
     
     <script type="importmap">
@@ -177,90 +126,66 @@
     </script>
     <link rel="stylesheet" href="/index.css">
   </head>
-  <body class="bg-[#1a100c] text-[#2c1810] h-screen overflow-hidden">
+  <body class="bg-rpg-dark text-rpg-dark h-screen overflow-hidden">
     
-    <!-- 新的 Loading 界面 -->
+    <!-- App Loader -->
     <div id="app-loader">
-      <!-- 矢量学者猫 SVG (内嵌代码，无需额外加载) -->
       <div class="scholar-cat-container">
         <svg class="cat-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-          <!-- 阴影 -->
           <ellipse cx="50" cy="95" rx="30" ry="5" fill="#000" opacity="0.3" />
-          
-          <!-- 书本底座 -->
           <path d="M20,85 Q20,90 25,90 L75,90 Q80,90 80,85 L80,75 Q80,80 75,80 L25,80 Q20,80 20,75 Z" fill="#5d4037" />
-          <path d="M22,78 L78,78 L78,88 L22,88 Z" fill="#f5f5dc" /> <!-- 书页 -->
-          <path d="M20,75 Q50,85 80,75 L80,85 Q50,95 20,85 Z" fill="#8d6e63" /> <!-- 封面 -->
-
-          <!-- 猫身体 -->
+          <path d="M22,78 L78,78 L78,88 L22,88 Z" fill="#f5f5dc" />
+          <path d="M20,75 Q50,85 80,75 L80,85 Q50,95 20,85 Z" fill="#8d6e63" />
           <path d="M35,75 Q30,40 50,30 Q70,40 65,75 Z" fill="#333" /> 
-          <!-- 猫耳朵 -->
           <path d="M38,35 L30,20 L48,32 Z" fill="#333" />
           <path d="M62,35 L70,20 L52,32 Z" fill="#333" />
-          
-          <!-- 眼镜 (学者特征) -->
           <g stroke="#ffd700" stroke-width="1" fill="none" opacity="0.9">
              <circle cx="43" cy="45" r="4" />
              <path d="M47,45 L53,45" />
              <circle cx="57" cy="45" r="4" />
           </g>
-
-          <!-- 眼睛 (带眨眼动画) -->
           <g class="cat-eye">
             <circle cx="43" cy="45" r="1.5" fill="#fff" />
             <circle cx="57" cy="45" r="1.5" fill="#fff" />
           </g>
-
-          <!-- 魔法光尘 -->
           <circle cx="50" cy="25" r="2" fill="#ffd700" class="magic-book-glow" />
           <circle cx="20" cy="40" r="1" fill="#ffd700" class="magic-book-glow" style="animation-delay: 0.5s"/>
           <circle cx="80" cy="50" r="1.5" fill="#ffd700" class="magic-book-glow" style="animation-delay: 1s"/>
         </svg>
       </div>
 
-      <div class="loading-text">
-        Deciphering Scrolls<span class="loading-dots"></span>
-      </div>
-      
+      <div class="loading-text">Deciphering Scrolls<span class="loading-dots"></span></div>
       <div class="rpg-progress-container">
         <div class="rpg-progress-bar"></div>
       </div>
-      
-      <div class="status-text">
-        Summoning Scholar Cat...
-      </div>
+      <div class="status-text">Summoning Scholar Cat...</div>
     </div>
 
     <div id="root" class="h-full"></div>
     
     <script>
       window.onload = function() {
+        // 简单的加载器逻辑：等待 root 节点有内容后移除加载动画
         const observer = new MutationObserver((mutations) => {
           if (document.getElementById('root').childElementCount > 0) {
              const loader = document.getElementById('app-loader');
              if (loader) {
-                // 跑满进度条
                 const bar = loader.querySelector('.rpg-progress-bar');
                 const text = loader.querySelector('.status-text');
                 if(bar) bar.style.width = '100%';
                 if(text) text.innerText = "Ready to Read";
                 
-                // 优雅退出
                 setTimeout(() => {
                   loader.style.opacity = '0';
-                  setTimeout(() => {
-                    loader.remove();
-                  }, 600);
+                  setTimeout(() => loader.remove(), 600);
                 }, 600);
                 observer.disconnect();
              }
           }
         });
-        
         observer.observe(document.getElementById('root'), { childList: true, subtree: true });
       };
     </script>
-
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
