@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/proxy/:match*",
+      "destination": "https://fanzisima.xyz/v1/:match*"
+    }
+  ]
+}
