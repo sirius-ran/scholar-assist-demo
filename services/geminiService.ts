@@ -2,18 +2,19 @@ import { PaperSummary, PageTranslation, ContentBlock, CitationInfo } from "../ty
 
 // ================= 配置区域 =================
 const API_KEY = import.meta.env.VITE_PROXY_API_KEY;
-const BASE_URL = import.meta.env.VITE_PROXY_BASE_URL; // 必须以 /v1 结尾，例如 https://api.xyz.com/v1
-const MODEL_NAME = '[贩子死妈]gemini-3-flash-preview'; // 即使是反代，通常也支持这个模型名
+const BASE_URL = import.meta.env.VITE_PROXY_BASE_URL; 
+// ✅ 修正：使用标准模型名，防止因恶搞名字导致请求失败
+const MODEL_NAME = 'gemini-1.5-flash'; 
 
-// 检查配置
+// 检查配置 (仅在控制台提示，不弹窗)
 if (!API_KEY || !BASE_URL) {
-  console.error("❌ 反代配置缺失！请在 .env 中设置 VITE_PROXY_API_KEY 和 VITE_PROXY_BASE_URL");
+  console.error("❌ API 配置缺失！请在 .env 中设置 API Key 和 Base URL");
 }
 
 // ================= 工具函数 =================
 
 /**
- * 通用 Fetch 请求封装 (OpenAI 兼容格式)
+ * 通用 Fetch 请求封装
  */
 async function callProxyApi(messages: any[], jsonMode = false) {
   const headers = {
@@ -28,7 +29,6 @@ async function callProxyApi(messages: any[], jsonMode = false) {
     temperature: 0.7
   };
 
-  // 如果需要强制 JSON 输出 (部分反代支持 response_format)
   if (jsonMode) {
     body.response_format = { type: "json_object" };
   }
@@ -42,30 +42,38 @@ async function callProxyApi(messages: any[], jsonMode = false) {
 
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
-      throw new Error(`API Error ${response.status}: ${errData.error?.message || response.statusText}`);
+      // 这里的 Error 只会在控制台看到，不会直接展示给用户
+      throw new Error(`Service Error ${response.status}: ${errData.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
+    
+    // 增加空值检查，防止 crash
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error("服务返回了空数据");
+    }
+    
     return data.choices[0].message.content;
 
   } catch (error) {
-    console.error("Proxy Request Failed:", error);
+    console.error("Service Request Failed:", error);
     throw error;
   }
 }
 
 /**
- * 清洗 JSON 字符串 (去除 Markdown 代码块)
+ * 清洗 JSON 字符串
  */
 function cleanJson(text: string): string {
   if (!text) return "{}";
+  // 移除 Markdown 标记，防止解析失败
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
 }
 
 // ================= 核心业务函数 =================
 
 /**
- * 1. 生成论文摘要 (Scholar Cat 风格)
+ * 1. 生成论文摘要
  */
 export const generatePaperSummary = async (base64Data: string, mimeType: string): Promise<PaperSummary> => {
   const prompt = `
@@ -88,7 +96,6 @@ export const generatePaperSummary = async (base64Data: string, mimeType: string)
     }
   `;
 
-  // 构造带附件的消息 (适配 OpenAI Vision 格式)
   const messages = [
     {
       role: "user",
@@ -97,8 +104,6 @@ export const generatePaperSummary = async (base64Data: string, mimeType: string)
         {
           type: "image_url",
           image_url: {
-            // 反代通常只认 image/jpeg 等图片格式，如果是 PDF，部分反代可能不支持直接传 Base64
-            // 这里假设你的反代支持 GPT-4o 风格的多模态输入
             url: `data:${mimeType};base64,${base64Data}`
           }
         }
@@ -111,11 +116,15 @@ export const generatePaperSummary = async (base64Data: string, mimeType: string)
     return JSON.parse(cleanJson(text)) as PaperSummary;
   } catch (error) {
     console.error("Summary generation failed:", error);
-    // 返回兜底数据防止白屏
+    // ✅ 修改：返回友好的错误提示
     return {
-      title: "读取失败",
-      tags: ["Error"],
-      tldr: { painPoint: "连接反代失败", solution: "请检查 Key", effect: "无" },
+      title: "解读中断",
+      tags: ["系统维护中"],
+      tldr: { 
+        painPoint: "与魔法图书馆的连接不稳定", 
+        solution: "请检查网络或稍后重试", 
+        effect: "暂无数据" 
+      },
       methodology: [],
       takeaways: []
     };
@@ -123,7 +132,7 @@ export const generatePaperSummary = async (base64Data: string, mimeType: string)
 };
 
 /**
- * 2. 翻译页面 (图文识别)
+ * 2. 翻译页面
  */
 export const translatePageContent = async (base64Image: string): Promise<PageTranslation> => {
   const prompt = `
@@ -164,16 +173,17 @@ export const translatePageContent = async (base64Image: string): Promise<PageTra
       glossary: data.glossary || []
     };
   } catch (error) {
+    // ✅ 修改：不再提“反代”或“识图失败”
     return {
       pageNumber: 0,
-      blocks: [{ type: "paragraph", en: "Error", cn: "页面翻译失败，请检查反代是否支持识图。" }],
+      blocks: [{ type: "paragraph", en: "Network Error", cn: "暂时无法获取翻译内容，请检查网络连接。" }],
       glossary: []
     };
   }
 };
 
 /**
- * 3. 聊天功能 (多轮对话)
+ * 3. 聊天功能
  */
 export const chatWithPaper = async (
   history: { role: 'user' | 'model', text: string }[],
@@ -189,12 +199,8 @@ export const chatWithPaper = async (
     规则：如果问公式，用 LaTeX 格式输出。
   `;
 
-  // 构造历史消息
-  // 注意：反代模式是无状态的，我们需要每次把 PDF 上下文发过去
-  // 为了节省 Token，我们只在第一条消息带 PDF，或者依靠上下文窗口
   const apiMessages = [
     { role: "system", content: systemPrompt },
-    // 模拟将 PDF 作为第一条用户消息的内容
     {
       role: "user",
       content: [
@@ -205,19 +211,18 @@ export const chatWithPaper = async (
         }
       ]
     },
-    // 插入历史记录
     ...history.map(h => ({
-      role: h.role === 'model' ? 'assistant' : 'user', // OpenAI 格式用 assistant
+      role: h.role === 'model' ? 'assistant' : 'user', 
       content: h.text
     })),
-    // 当前问题
     { role: "user", content: currentMessage }
   ];
 
   try {
     return await callProxyApi(apiMessages);
   } catch (error) {
-    return "喵呜！反代服务器连接断开了... [=T_T=]";
+    // ✅ 修改：符合猫咪人设的错误提示
+    return "喵呜！魔法信号似乎中断了... 请稍后再试 [=T_T=]";
   }
 };
 
@@ -232,7 +237,7 @@ export const translateSelection = async (text: string): Promise<string> => {
   try {
     return await callProxyApi(messages);
   } catch (error) {
-    return "翻译失败";
+    return "翻译服务暂不可用";
   }
 };
 
@@ -260,7 +265,7 @@ export const analyzeCitation = async (citationId: string, base64Pdf: string, mim
     const text = await callProxyApi(messages, true);
     return JSON.parse(cleanJson(text)) as CitationInfo;
   } catch (e) {
-    return { id: citationId, title: "未知", year: "?", abstract: "检索失败", status: "NORMAL" };
+    return { id: citationId, title: "获取失败", year: "?", abstract: "无法检索该文献信息", status: "NORMAL" };
   }
 };
 
@@ -275,6 +280,6 @@ export const explainEquation = async (equation: string): Promise<string> => {
   try {
     return await callProxyApi(messages);
   } catch (error) {
-    return "无法解释公式";
+    return "暂时无法解析此公式";
   }
 };
