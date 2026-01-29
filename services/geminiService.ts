@@ -5,8 +5,8 @@ import { PaperSummary, PageTranslation, ContentBlock, CitationInfo } from "../ty
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Model constants
-const FAST_MODEL = 'gemini-1.5-flash';
-const REASONING_MODEL = 'gemini-1.5-flash';
+const FAST_MODEL = 'gemini-1.5-flash-001';
+const REASONING_MODEL = 'gemini-1.5-flash-001';
 
 /**
  * Generates a structured summary of the paper in "Scholar Cat Magic Report" style.
