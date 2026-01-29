@@ -3,7 +3,7 @@ import { PaperSummary, PageTranslation, ContentBlock, CitationInfo } from "../ty
 // ================= 配置区域 =================
 const API_KEY = import.meta.env.VITE_PROXY_API_KEY;
 const BASE_URL = import.meta.env.VITE_PROXY_BASE_URL; // 必须以 /v1 结尾，例如 https://api.xyz.com/v1
-const MODEL_NAME = 'gemini-3-flash-preview'; // 即使是反代，通常也支持这个模型名
+const MODEL_NAME = '[贩子死妈]gemini-3-flash-preview'; // 即使是反代，通常也支持这个模型名
 
 // 检查配置
 if (!API_KEY || !BASE_URL) {
